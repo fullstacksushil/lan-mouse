@@ -422,7 +422,20 @@ fi
 # Everything under Frameworks was copied there by bundle_lib, so every file is
 # Mach-O nested code and needs a signature -- matching on *.dylib would leave a
 # differently named library (e.g. a .so) unsigned and the bundle seal invalid.
-find "$fwks_path" -type f -exec codesign --force --sign - {} +
-codesign --force --sign - "$bundle_path"
+#
+# Ad-hoc signatures change with every build, which makes macOS drop the
+# Accessibility grant. Sign with a stable local identity when one is available
+# (override with CODESIGN_IDENTITY) so the grant survives rebuilds.
+local_identity="Lan Mouse Local Signing"
+if [ -z "${CODESIGN_IDENTITY:-}" ]; then
+  if security find-identity -p codesigning 2>/dev/null | grep -qF "\"$local_identity\""; then
+    CODESIGN_IDENTITY="$local_identity"
+  else
+    CODESIGN_IDENTITY="-"
+  fi
+fi
+echo "Signing with identity: $CODESIGN_IDENTITY"
+find "$fwks_path" -type f -exec codesign --force --sign "$CODESIGN_IDENTITY" {} +
+codesign --force --sign "$CODESIGN_IDENTITY" "$bundle_path"
 
 echo "Done!"
