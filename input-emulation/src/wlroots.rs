@@ -39,6 +39,8 @@ struct State {
     keymap: Option<(u32, OwnedFd, u32)>,
     /// shared by all clients, so the keymap fd is sent once instead of once per client
     keyboard: Option<Vk>,
+    /// modifiers last sent on the shared keyboard
+    keyboard_mods: Arc<Mutex<[u32; 4]>>,
     input_for_client: HashMap<EmulationHandle, VirtualInput>,
     seat: wl_seat::WlSeat,
     qh: QueueHandle<Self>,
@@ -77,6 +79,7 @@ impl WlrootsEmulation {
             state: State {
                 keymap: None,
                 keyboard: None,
+                keyboard_mods: Default::default(),
                 input_for_client,
                 seat,
                 vpm,
@@ -116,6 +119,7 @@ impl State {
         let vinput = VirtualInput {
             pointer,
             keyboard,
+            keyboard_mods: self.keyboard_mods.clone(),
             modifiers: Arc::new(Mutex::new(XMods::empty())),
         };
 
@@ -188,10 +192,26 @@ impl Emulation for WlrootsEmulation {
 struct VirtualInput {
     pointer: Vp,
     keyboard: Vk,
+    keyboard_mods: Arc<Mutex<[u32; 4]>>,
     modifiers: Arc<Mutex<XMods>>,
 }
 
 impl VirtualInput {
+    /// Skips modifier events that change nothing: Hyprland re-creates the
+    /// input-capture keyboard on any virtual keyboard activity and never
+    /// restarts it mid-capture, which leaves the keyboard dead on the remote
+    /// side. The peer sends all-zero modifiers on every capture release.
+    fn send_modifiers(&self, depressed: u32, latched: u32, locked: u32, group: u32) {
+        let mods = [depressed, latched, locked, group];
+        if let Ok(mut sent) = self.keyboard_mods.lock() {
+            if *sent == mods {
+                return;
+            }
+            *sent = mods;
+        }
+        self.keyboard.modifiers(depressed, latched, locked, group);
+    }
+
     fn consume_event(&self, event: Event) -> Result<(), ()> {
         let now: u32 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -232,7 +252,7 @@ impl VirtualInput {
                     if let Ok(mut mods) = self.modifiers.lock() {
                         if mods.update_by_key_event(key, state) {
                             log::trace!("Key triggers modifier change: {mods:?}");
-                            self.keyboard.modifiers(
+                            self.send_modifiers(
                                 mods.mask_pressed().bits(),
                                 0,
                                 mods.mask_locks().bits(),
@@ -251,8 +271,7 @@ impl VirtualInput {
                     if let Ok(mut mods) = self.modifiers.lock() {
                         mods.update_by_mods_event(e);
                     }
-                    self.keyboard
-                        .modifiers(mods_depressed, mods_latched, mods_locked, group);
+                    self.send_modifiers(mods_depressed, mods_latched, mods_locked, group);
                 }
             },
         }
