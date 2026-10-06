@@ -377,8 +377,12 @@ impl CaptureTask {
             CaptureEvent::Begin => ProtoEvent::Enter(opposite_pos),
             CaptureEvent::Input(e) => match self.state {
                 // connection not acknowledged, repeat `Enter` event
-                State::WaitingForAck => ProtoEvent::Enter(opposite_pos),
-                State::Sending => ProtoEvent::Input(e),
+                // keyboard events are always forwarded: dropping a key-up here
+                // leaves the key stuck on the peer
+                State::WaitingForAck if !matches!(e, Event::Keyboard(_)) => {
+                    ProtoEvent::Enter(opposite_pos)
+                }
+                _ => ProtoEvent::Input(e),
             },
         };
 
