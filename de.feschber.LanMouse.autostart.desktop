@@ -1,0 +1,9 @@
+[Desktop Entry]
+Comment=Mouse & Keyboard sharing via LAN
+Exec=lan-mouse daemon
+Icon=de.feschber.LanMouse
+Name=Lan Mouse
+NoDisplay=true
+Terminal=false
+Type=Application
+X-GNOME-Autostart-enabled=true
